@@ -155,9 +155,7 @@ public class ElasticsearchConnectorNetworkIT extends BaseConnectorIT {
   @Test
   public void testReadTimeout() throws Exception {
     wireMockRule.stubFor(post(urlPathEqualTo("/_bulk"))
-        .willReturn(
-            okJson(minimumResponseJson()).withFixedDelay(2_000)
-        )
+        .willReturn(aResponse().withFixedDelay(2_000))
     );
 
     connect.configureConnector(CONNECTOR_NAME, props);
