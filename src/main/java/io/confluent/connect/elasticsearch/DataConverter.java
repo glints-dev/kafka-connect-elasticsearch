@@ -71,10 +71,13 @@ public class DataConverter {
   private final ElasticsearchSinkConnectorConfig config;
 
   /**
-   * Create a DataConverter, specifying how map entries with string keys within record
+   * Create a DataConverter, specifying how map entries with string keys within
+   * record
    * values should be written to JSON. Compact map entries are written as
-   * <code>"entryKey": "entryValue"</code>, while the non-compact form are written as a nested
-   * document such as <code>{"key": "entryKey", "value": "entryValue"}</code>. All map entries
+   * <code>"entryKey": "entryValue"</code>, while the non-compact form are written
+   * as a nested
+   * document such as <code>{"key": "entryKey", "value": "entryValue"}</code>. All
+   * map entries
    * with non-string keys are always written as nested documents.
    *
    * @param config connector config
@@ -94,8 +97,7 @@ public class DataConverter {
       schemaType = ConnectSchema.schemaType(key.getClass());
       if (schemaType == null) {
         throw new DataException(
-            "Java class " + key.getClass() + " does not have corresponding schema type."
-        );
+            "Java class " + key.getClass() + " does not have corresponding schema type.");
       }
     } else {
       schemaType = keySchema.type();
@@ -121,17 +123,21 @@ public class DataConverter {
           return null;
         case DELETE:
           if (record.key() == null) {
-            // Since the record key is used as the ID of the index to delete and we don't have a key
+            // Since the record key is used as the ID of the index to delete and we don't
+            // have a key
             // for this record, we can't delete anything anyways, so we ignore the record.
-            // We can also disregard the value of the ignoreKey parameter, since even if it's true
-            // the resulting index we'd try to delete would be based solely off topic/partition/
-            // offset information for the SinkRecord. Since that information is guaranteed to be
-            // unique per message, we can be confident that there wouldn't be any corresponding
+            // We can also disregard the value of the ignoreKey parameter, since even if
+            // it's true
+            // the resulting index we'd try to delete would be based solely off
+            // topic/partition/
+            // offset information for the SinkRecord. Since that information is guaranteed
+            // to be
+            // unique per message, we can be confident that there wouldn't be any
+            // corresponding
             // index present in ES to delete anyways.
             log.trace(
                 "Ignoring {} with null key, since the record key is used as the ID of the index",
-                recordString(record)
-            );
+                recordString(record));
             return null;
           }
           // Will proceed as normal, ultimately creating a DeleteRequest
@@ -147,9 +153,7 @@ public class DataConverter {
                   record.key(),
                   ElasticsearchSinkConnectorConfig.BEHAVIOR_ON_NULL_VALUES_CONFIG,
                   BehaviorOnNullValues.FAIL,
-                  BehaviorOnNullValues.IGNORE
-              )
-          );
+                  BehaviorOnNullValues.IGNORE));
       }
     }
 
@@ -176,8 +180,7 @@ public class DataConverter {
         OpType opType = config.isDataStream() ? OpType.CREATE : OpType.INDEX;
         return maybeAddExternalVersioning(
             new IndexRequest(index).id(id).source(payload, XContentType.JSON).opType(opType),
-            record
-        );
+            record);
       default:
         return null; // shouldn't happen
     }
@@ -224,18 +227,20 @@ public class DataConverter {
 
   /**
    * In many cases, we explicitly set the record version using the topic's offset.
-   * This version will, in turn, be checked by Elasticsearch and will throw a versioning
+   * This version will, in turn, be checked by Elasticsearch and will throw a
+   * versioning
    * error if the request represents an equivalent or older version of the record.
    *
    * @param request the request currently being constructed for `record`
-   * @param record the record to be processed
+   * @param record  the record to be processed
    * @return the (possibly modified) request which was passed in
    */
   private DocWriteRequest<?> maybeAddExternalVersioning(
       DocWriteRequest<?> request,
-      SinkRecord record
-  ) {
-    if (!config.isDataStream() && !config.shouldIgnoreKey(record.topic())) {
+      SinkRecord record) {
+    if (!config.shouldIgnoreVersion() 
+        && !config.isDataStream() 
+        && !config.shouldIgnoreKey(record.topic())) {
       request.versionType(VersionType.EXTERNAL);
       request.version(record.kafkaOffset());
     }
@@ -243,10 +248,14 @@ public class DataConverter {
     return request;
   }
 
-  // We need to pre process the Kafka Connect schema before converting to JSON as Elasticsearch
-  // expects a different JSON format from the current JSON converter provides. Rather than
-  // completely rewrite a converter for Elasticsearch, we will refactor the JSON converter to
-  // support customized translation. The pre process is no longer needed once we have the JSON
+  // We need to pre process the Kafka Connect schema before converting to JSON as
+  // Elasticsearch
+  // expects a different JSON format from the current JSON converter provides.
+  // Rather than
+  // completely rewrite a converter for Elasticsearch, we will refactor the JSON
+  // converter to
+  // support customized translation. The pre process is no longer needed once we
+  // have the JSON
   // converter refactored.
   // visible for testing
   Schema preProcessSchema(Schema schema) {
@@ -385,7 +394,7 @@ public class DataConverter {
   private Object preProcessArrayValue(Object value, Schema schema, Schema newSchema) {
     Collection<?> collection = (Collection<?>) value;
     List<Object> result = new ArrayList<>();
-    for (Object element: collection) {
+    for (Object element : collection) {
       result.add(preProcessValue(element, schema.valueSchema(), newSchema.valueSchema()));
     }
     return result;
@@ -398,16 +407,15 @@ public class DataConverter {
     Map<?, ?> map = (Map<?, ?>) value;
     if (config.useCompactMapEntries() && keySchema.type() == Schema.Type.STRING) {
       Map<Object, Object> processedMap = new HashMap<>();
-      for (Map.Entry<?, ?> entry: map.entrySet()) {
+      for (Map.Entry<?, ?> entry : map.entrySet()) {
         processedMap.put(
             preProcessValue(entry.getKey(), keySchema, newSchema.keySchema()),
-            preProcessValue(entry.getValue(), valueSchema, newValueSchema)
-        );
+            preProcessValue(entry.getValue(), valueSchema, newValueSchema));
       }
       return processedMap;
     }
     List<Struct> mapStructs = new ArrayList<>();
-    for (Map.Entry<?, ?> entry: map.entrySet()) {
+    for (Map.Entry<?, ?> entry : map.entrySet()) {
       Struct mapStruct = new Struct(newValueSchema);
       Schema mapKeySchema = newValueSchema.field(MAP_KEY).schema();
       Schema mapValueSchema = newValueSchema.field(MAP_VALUE).schema();
@@ -434,7 +442,6 @@ public class DataConverter {
         "record from topic=%s partition=%s offset=%s",
         record.topic(),
         record.kafkaPartition(),
-        record.kafkaOffset()
-    );
+        record.kafkaOffset());
   }
 }

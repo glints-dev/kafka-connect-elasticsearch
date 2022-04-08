@@ -32,6 +32,7 @@ import static io.confluent.connect.elasticsearch.ElasticsearchSinkConnectorConfi
 import static io.confluent.connect.elasticsearch.ElasticsearchSinkConnectorConfig.SECURITY_PROTOCOL_CONFIG;
 import static io.confluent.connect.elasticsearch.ElasticsearchSinkConnectorConfig.SSL_CONFIG_PREFIX;
 import static io.confluent.connect.elasticsearch.ElasticsearchSinkConnectorConfig.WRITE_METHOD_CONFIG;
+import static io.confluent.connect.elasticsearch.ElasticsearchSinkConnectorConfig.IGNORE_VERSION_CONFIG;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertThrows;
@@ -122,7 +123,7 @@ public class ElasticsearchClientTest {
 
   @After
   public void cleanup() throws IOException {
-    if (helperClient != null && helperClient.indexExists(index)){
+    if (helperClient != null && helperClient.indexExists(index)) {
       helperClient.deleteIndex(index, config.isDataStream());
     }
   }
@@ -145,7 +146,8 @@ public class ElasticsearchClientTest {
           if (!bulkProcessor.awaitClose(1, TimeUnit.MILLISECONDS)) {
             throw new ConnectException("Failed to process all outstanding requests in time.");
           }
-        } catch (InterruptedException e) {}
+        } catch (InterruptedException e) {
+        }
       }
     };
 
@@ -153,8 +155,7 @@ public class ElasticsearchClientTest {
     assertThrows(
         "Failed to process all outstanding requests in time.",
         ConnectException.class,
-        () -> client.close()
-    );
+        () -> client.close());
     waitUntilRecordsInES(1);
   }
 
@@ -504,7 +505,7 @@ public class ElasticsearchClientTest {
 
     ErrantRecordReporter reporter = mock(ErrantRecordReporter.class);
     when(reporter.report(any(), any()))
-            .thenReturn(CompletableFuture.completedFuture(null));
+        .thenReturn(CompletableFuture.completedFuture(null));
     ElasticsearchClient client = new ElasticsearchClient(config, reporter, () -> offsetTracker.updateOffsets());
     client.createIndexOrDataStream(index);
     client.createMapping(index, schema());
@@ -552,10 +553,10 @@ public class ElasticsearchClientTest {
     client.close();
   }
 
-
   /**
    * Cause a version conflict error.
    * Assumes that Elasticsearch VersionType is 'EXTERNAL' for the records
+   * 
    * @param client The Elasticsearch client object to which to send records
    * @return List of duplicated SinkRecord objects
    */
@@ -599,8 +600,46 @@ public class ElasticsearchClientTest {
   }
 
   /**
-   * If the record version is set to VersionType.EXTERNAL (normal case for non-streaming),
+   * VERSION_IGNORE_CONFIG is set to true, then Version.EXTERNAL is not used
+   * even if the IGNORE_KEY_CONFIG is said to false.
+   *
+   * In this case, even if records
+   * are written with a kafka offset, less than the previous indexed record and no
+   * exception should be thrown.
+   * 
+   * @throws Exception will be thrown if the test fails
+   */
+  @Test
+  public void testInternalVersionUsedForVersionIgnore() throws Exception {
+    props.put(IGNORE_VERSION_CONFIG, "true");
+    props.put(IGNORE_KEY_CONFIG, "false");
+    config = new ElasticsearchSinkConnectorConfig(props);
+    converter = new DataConverter(config);
+
+    ErrantRecordReporter reporter = mock(ErrantRecordReporter.class);
+    ElasticsearchClient client = new ElasticsearchClient(config, reporter, () -> offsetTracker.updateOffsets()) {
+      protected boolean handleResponse(BulkItemResponse response, DocWriteRequest<?> request,
+          long executionId) {
+        // Check if request version type is INTERNAL
+        assertEquals(request.versionType(), VersionType.INTERNAL);
+        return super.handleResponse(response, request, executionId);
+      }
+    };
+
+    List<SinkRecord> duplicate_records = causeExternalVersionConflictError(client);
+
+    // Make sure that no error was reported for any record(s)
+    for (SinkRecord duplicated_record : duplicate_records) {
+      verify(reporter, never()).report(eq(duplicated_record), any(Throwable.class));
+    }
+    client.close();
+  }
+
+  /**
+   * If the record version is set to VersionType.EXTERNAL (normal case for
+   * non-streaming),
    * then same or less version number will throw a version conflict exception.
+   * 
    * @throws Exception will be thrown if the test fails
    */
   @Test
@@ -622,12 +661,15 @@ public class ElasticsearchClientTest {
   }
 
   /**
-   * If the record version is set to VersionType.INTERNAL (normal case streaming/logging),
+   * If the record version is set to VersionType.INTERNAL (normal case
+   * streaming/logging),
    * then same or less version number will throw a version conflict exception.
    * In this test, we are checking that the client function `handleResponse`
    * properly reports an error for seeing the version conflict error along with
-   * VersionType of INTERNAL.  We still actually cause the error via an external
-   * version conflict error, but flip the version type to internal before it is interpreted.
+   * VersionType of INTERNAL. We still actually cause the error via an external
+   * version conflict error, but flip the version type to internal before it is
+   * interpreted.
+   * 
    * @throws Exception will be thrown if the test fails
    */
   @Test
@@ -644,7 +686,7 @@ public class ElasticsearchClientTest {
     // "EXTERNAL" (version maintained by the connector as kafka offset)
     ElasticsearchClient client = new ElasticsearchClient(config, reporter, () -> offsetTracker.updateOffsets()) {
       protected boolean handleResponse(BulkItemResponse response, DocWriteRequest<?> request,
-                                    long executionId) {
+          long executionId) {
         // Make it think it was an internal version conflict.
         // Note that we don't make any attempt to reset the response version number,
         // which will be -1 here.
@@ -790,8 +832,7 @@ public class ElasticsearchClientTest {
         value,
         offset,
         System.currentTimeMillis(),
-        TimestampType.CREATE_TIME
-    );
+        TimestampType.CREATE_TIME);
   }
 
   private void waitUntilRecordsInES(int expectedRecords) throws InterruptedException {
@@ -808,12 +849,11 @@ public class ElasticsearchClientTest {
           }
         },
         TimeUnit.MINUTES.toMillis(1),
-        String.format("Could not find expected documents (%d) in time.", expectedRecords)
-    );
+        String.format("Could not find expected documents (%d) in time.", expectedRecords));
   }
 
   private void writeRecord(SinkRecord record, ElasticsearchClient client) {
     client.index(record, converter.convertRecord(record, createIndexName(record.topic())),
-            new AsyncOffsetTracker.AsyncOffsetState(record.kafkaOffset()));
+        new AsyncOffsetTracker.AsyncOffsetState(record.kafkaOffset()));
   }
 }
